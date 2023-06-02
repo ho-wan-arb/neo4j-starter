@@ -1,0 +1,149 @@
+# stateful set (neo4j deployment)
+#
+# NOTE this is only for development / experimental settings. For deployments in
+# integration / production environments use
+#
+#   https://neo4j.com/docs/operations-manual/current/cloud-deployments/neo4j-gcp/
+#
+# Alternatively, for staging / integration environments you can use the helm
+# charts as described in https://neo4j.com/docs/operations-manual/current/kubernetes/
+
+apiVersion: "apps/v1"
+kind: StatefulSet
+metadata:
+  name: neo4j
+
+spec:
+  serviceName: neo4j
+  replicas: 1
+  selector:
+    matchLabels:
+      app: neo4j
+
+  template:
+
+    metadata:
+      labels:
+        app: neo4j
+      annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "2004"
+
+    spec:
+      containers:
+      - name: neo4j
+        image: "neo4j:5.8.0"
+        imagePullPolicy: "IfNotPresent"
+        env:
+          - name: NEO4J_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: neo4j-secrets 
+                key: auth
+        ports:
+        - containerPort: 7474
+          name: http
+        - containerPort: 7473
+          name: https
+        - containerPort: 7687
+          name: bolt
+        - containerPort: 6362
+          name: backup
+        - containerPort: 2004
+          name: prometheus
+
+        volumeMounts:
+        - name: datadir
+          mountPath: "/data"
+        - name: config
+          mountPath: "/conf"
+
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 1
+            memory: 1Gi
+
+        readinessProbe:
+          tcpSocket:
+            port: 7687
+          initialDelaySeconds: 30
+          periodSeconds: 3
+
+        livenessProbe:
+          initialDelaySeconds: 60
+          tcpSocket:
+            port: 7687
+
+      volumes:
+        - name: config
+          configMap:
+            name: neo4j-config
+
+  volumeClaimTemplates:
+    - metadata:
+        name: datadir
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: "10Gi"
+
+---
+# configuration (mounted in /conf)
+
+# TODO need to figure out how to monitor - metrics are only available in the
+# enterprise edition https://neo4j.com/docs/operations-manual/current/monitoring/metrics/ 
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neo4j-config
+
+data:
+  neo4j.conf: |
+    server.memory.pagecache.size=128M
+    server.default_listen_address=0.0.0.0
+    server.directories.logs=/logs
+    server.config.strict_validation.enabled=false
+
+    server.metrics.prometheus.enabled=true
+---
+# secret (exposed through environment variables)
+
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: neo4j-secrets
+
+stringData:
+  auth: neo4j/changeme
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4jsvc  # NOTE must not start with neo4j-, as this creates environment
+                  # variables like NEO4J_SVC_PORT_7687_TCP_PORT=7687, which neo4j
+                  # picks up as configuraiton settings - and fails
+                  # see also https://kubernetes.io/docs/concepts/services-networking/service/#discovering-services
+spec:
+  selector:
+    app: neo4j
+  ports:
+  - port: 7474
+    name: http
+  - port: 7473
+    name: https
+  - port: 7687
+    name: bolt
+
+# TODO check whether we need to open an ingress, e.g., to connect directly to
+      # the https port

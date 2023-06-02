@@ -1,0 +1,28 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: dev-cluster
+
+networking:
+  apiServerPort: 6443
+
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+    - |
+      kind: InitConfiguration
+      nodeRegistration:
+        kubeletExtraArgs:
+          node-labels: "ingress-ready=true"
+    extraPortMappings:
+    # http / https ports for web applications through ingress
+    - containerPort: 80
+      hostPort: 8080
+      protocol: TCP
+    - containerPort: 443
+      hostPort: 8443
+      protocol: TCP
+
+    # bolt port for neo4j connections
+    - containerPort: 32687
+      hostPort: 7687
+      protocol: TCP
