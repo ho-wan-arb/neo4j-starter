@@ -44,12 +44,13 @@ func TestAdapter_CreateFixedEntity(t *testing.T) {
 
 func TestAdapter_CreateEntities(t *testing.T) {
 	gen := resolvetest.NewDataGen(1)
-	testEntity := gen.NewEntity()
 
-	fmt.Println(prettyPrint(testEntity))
+	testEntities := gen.NewEntities(3)
+
+	fmt.Println(prettyPrint(testEntities))
 }
 
-func prettyPrint(i interface{}) string {
+func prettyPrint(i any) string {
 	s, _ := json.MarshalIndent(i, "", "\t")
 	return string(s)
 }
