@@ -50,7 +50,7 @@ func (g *DataGen) NewEntity() *resolve.Entity {
 		Name:        g.NewEntityNameDurations(g.IntRange(0, 2), from),
 		Country:     g.NewEntityCountryDurations(g.IntRange(0, 1), from),
 		Identifiers: g.NewIdentifiersDurations(from),
-		Securities:  g.NewSecuritiesDurations(3, from),
+		Securities:  g.NewSecuritiesDurations(4, from),
 	}
 	return &e
 }
@@ -140,13 +140,18 @@ func (g *DataGen) NewSecuritiesDurations(maxSecurities int, from time.Time) []re
 	securitiesDurations := make([]resolve.DetailDuration[[]resolve.Security], 0, 1)
 
 	securitiesCount := g.IntRange(0, maxSecurities)
+	if securitiesCount == 0 {
+		return nil
+	}
 
 	initialSecurities := make([]resolve.Security, 0, securitiesCount)
 
+	primary := g.IntRange(0, securitiesCount)
 	for i := 0; i < securitiesCount; i++ {
 		initialSecurities = append(initialSecurities, resolve.Security{
 			Name:        fmt.Sprintf("%s %s", g.Adjective(), g.Noun()),
 			Identifiers: g.NewSecurityIdentifiers(),
+			IsPrimary:   primary == i,
 		})
 	}
 
@@ -164,19 +169,19 @@ func (g *DataGen) NewSecurityIdentifiers() []resolve.Identifier {
 	var identifiers []resolve.Identifier
 
 	// random chance to add identifiers
-	if f := g.Float32Range(0, 1); f < 0.5 {
+	if f := g.Float32Range(0, 1); f < 0.8 {
 		identifiers = append(identifiers, resolve.Identifier{
 			Type:  "asset_id",
 			Value: g.newAssetID(),
 		})
 	}
-	if f := g.Float32Range(0, 1); f < 0.5 {
+	if f := g.Float32Range(0, 1); f < 0.8 {
 		identifiers = append(identifiers, resolve.Identifier{
 			Type:  "isin",
 			Value: g.newIsin(),
 		})
 	}
-	if f := g.Float32Range(0, 1); f < 0.5 {
+	if f := g.Float32Range(0, 1); f < 0.8 {
 		identifiers = append(identifiers, resolve.Identifier{
 			Type:  "cusip",
 			Value: g.newCusip(),
