@@ -13,6 +13,10 @@ CREATE (Isin3)-[:IDENTIFIES {roles:['identifier']}]->(ESGBook)
 CREATE INDEX identifier_type_value IF NOT EXISTS
 FOR (idn:Identifier) ON (idn.type,idn.value)
 
+// Create index on relation
+CREATE INDEX identifies_roles IF NOT EXISTS
+FOR (it:IDENTIFIES) ON (it.roles)
+
 // Get all entities with identifier relations
 MATCH (ent:Entity)<-[:IDENTIFIES]->(idns) RETURN ent,idns
 
