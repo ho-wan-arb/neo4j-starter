@@ -44,21 +44,24 @@ WITH ent,collect(distinct(idn)) + collect(i) as ii
 UNWIND ii as idns
 RETURN ent as entity,collect(idns) as identifiers
 
-// Optional match
-MATCH (idn:Identifier{type:$type,value:$value})<--(ent:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
-WHERE ($date > hi.from and (hi.until IS NULL OR $date < hi.until))
-WITH ent,collect(distinct(idn)) + collect(i) as ii
-UNWIND ii as idns
+// Match on identifier belonging to entity returning name, country and security identifiers
+MATCH (idn:Identifier{type:'sray_entity_id',value:'1'})<--(ent:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
+    WHERE ($date > hi.from and (hi.until IS NULL OR $date < hi.until))
+OPTIONAL MATCH (ent)-[hs:HAS_SECURITY]->(sec:Security)-->(si:Identifier)
+    WHERE ($date > hs.from and (hs.until IS NULL OR $date < hs.until))
+WITH ent,collect(distinct(idn)) + collect(i) as ii,collect(distinct(sec)) as securities,collect(si) as security_identifiers
+    UNWIND ii as idns
 OPTIONAL MATCH (ent)-[hn:HAS_NAME]->(name:EntityName)
-WHERE ($date > hn.from and (hn.until IS NULL OR $date < hn.until))
+    WHERE ($date > hn.from and (hn.until IS NULL OR $date < hn.until))
 OPTIONAL MATCH (ent)-[hc:HAS_COUNTRY]->(country:Country)
-WHERE ($date > hc.from and (hc.until IS NULL OR $date < hc.until))
-RETURN ent as entity,collect(idns) as identifiers,name
+    WHERE ($date > hc.from and (hc.until IS NULL OR $date < hc.until))
+RETURN ent as entity,collect(distinct(idns)) as identifiers,name,country,securities,security_identifiers
 
 // Delete all nodes
 MATCH (n) DETACH DELETE n
 
 // Profile raw query to create entity with params replaced
+// (query not optimized due to incrementing variable names)
 PROFILE
 CREATE (entity_0:Entity {id:'4f163f5f-0f9a-421d-b295-66c74d10037c'})
 CREATE (entity_0)-[:HAS_NAME {from:'2020-04-27T00:00:00Z',until:'2023-03-31T00:00:00Z'}]->(entity_0_name_0:EntityName {value:'Stevens Worldwide Van Lines'})
@@ -78,3 +81,62 @@ CREATE (entity_0_duration_0_security_1)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00
 CREATE (entity_0)-[:HAS_SECURITY {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_2:Security {name:'where villa'})
 CREATE (entity_0_duration_0_security_2)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_2_identifier_0:Identifier {type:'asset_id',value:'3'})
 CREATE (entity_0_duration_0_security_2)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_2_identifier_1:Identifier {type:'cusip',value:'VMKIR0XC6'})
+
+// Create entity and optional name (does not fall through if entity does not have a name)
+
+WITH [['1','Entity A'],['2','Entity B'],['3','']] as entities
+UNWIND entities AS e
+WITH e
+CREATE (ent:Entity {id: e[0]})
+WITH e,ent
+WHERE e[1] <> ''
+CREATE (ent)-[:HAS_NAME]->(:Name {value: e[1]})
+
+---
+
+// Create entity and identifiers
+
+WITH [['1','Entity A',[['sray_entity_id','1'],['fs_entity_id','000001-e']]],['2','Entity B',[]],['3','',[['sray_entity_id','3']]]] as entities
+UNWIND entities AS e
+CREATE (ent:Entity {id: e[0]})
+CREATE (ent)-[:HAS_NAME]->(:Name {value: e[1]})
+FOREACH (idn IN e[2] | MERGE (ent)-[:HAS_IDENTIFIER]->(:Identifier {type: idn[0],value: idn[1]}))
+
+// Create entity and identifiers with durations
+WITH [
+    ['1',[['Entity A','2020-04-27T00:00:00Z','2023-03-31T00:00:00Z'],['Entity A1','2023-03-31T00:00:00Z',null]],
+        [
+            [[['sray_entity_id','1'],['fs_entity_id','000001-e']],'2020-04-27T00:00:00Z','2023-03-31T00:00:00Z'],
+            [[['sray_entity_id','1']],'2023-03-31T00:00:00Z',null]
+        ]
+    ],
+    ['2',[['Entity B','2021-04-27T00:00:00Z','2023-03-31T00:00:00Z']],
+        [[]]
+    ],
+    ['3',[['Entity C','2021-04-27T00:00:00Z',null]],
+        [[[['sray_entity_id','3']],'2021-04-27T00:00:00Z',null]]
+    ]
+] as entities
+UNWIND entities AS e
+CREATE (ent:Entity {id: e[0]})
+FOREACH (nd IN e[1] | CREATE (ent)-[:HAS_NAME {from: nd[1], until: nd[2]}]->(:Name {value: nd[0]}))
+FOREACH (idnd IN e[2] |
+    FOREACH (idn IN idnd[0] |
+        MERGE (im:Identifier {type: idn[0],value: idn[1]})
+        CREATE (ent)-[:HAS_IDENTIFIER {from: idnd[1], until: idnd[2]}]->(im)
+    )
+)
+
+// Create securities
+WITH [
+    ['1', [['Security A', [['asset_id','1'],['isin','DEK1HH2GDN09']]],['Security B', [['asset_id','2']]]]]
+] as securities
+UNWIND securities as s
+MATCH (ent:Entity{id: s[0]})
+FOREACH (ss IN s[1] |
+    CREATE (ent)-[:HAS_SECURITY]->(sec:Security {name: ss[0]})
+    FOREACH (si IN ss[1] |
+        MERGE (im:Identifier {type: si[0],value: si[1]})
+        CREATE (sec)-[:HAS_IDENTIFIER]->(im)
+    )
+)

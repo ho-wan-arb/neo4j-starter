@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"testing"
 	"time"
 
@@ -43,10 +42,10 @@ func TestAdapter_CreateEntities(t *testing.T) {
 
 	gen := resolvetest.NewDataGen(1)
 
-	entityCount := 1
+	entityCount := 100
 	testEntities := gen.NewEntities(entityCount)
 
-	batchsize := 1
+	batchsize := 10
 	var cursor int
 
 	for cursor < entityCount {
@@ -74,7 +73,7 @@ func TestAdapter_LookupDirectEntities(t *testing.T) {
 	require.NoError(t, err)
 
 	// entity ids should have been created in the DB already
-	const maxSrayEntityID = 10000
+	// const maxSrayEntityID = 1000
 	const lookupCount = 1000
 
 	var lookups []resolve.Lookup
@@ -82,9 +81,9 @@ func TestAdapter_LookupDirectEntities(t *testing.T) {
 		lookup := resolve.Lookup{
 			Date: lookupDate,
 			Identifier: resolve.Identifier{
-				Type:  "sray_entity_id",
-				Value: fmt.Sprint(rand.Intn(maxSrayEntityID)),
-				// Value: fmt.Sprint(i),
+				Type: "sray_entity_id",
+				// Value: fmt.Sprint(rand.Intn(maxSrayEntityID)),
+				Value: fmt.Sprint(i),
 			},
 		}
 		lookups = append(lookups, lookup)

@@ -178,13 +178,15 @@ func (a *Adapter) LookupDirectEntities(ctx context.Context, lookups []resolve.Lo
 		qb.WriteString(`
 			MATCH (idn:Identifier{type:$type,value:$value})<--(ent:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
 				WHERE ($date > hi.from and (hi.until IS NULL OR $date < hi.until))
-			WITH ent,collect(distinct(idn)) + collect(i) as ii
+			OPTIONAL MATCH (ent)-[hs:HAS_SECURITY]->(sec:Security)-->(si:Identifier)
+				WHERE ($date > hs.from and (hs.until IS NULL OR $date < hs.until))
+			WITH ent,collect(distinct(idn)) + collect(i) as ii,collect(distinct(sec)) as securities,collect(si) as security_identifiers
 				UNWIND ii as idns
 			OPTIONAL MATCH (ent)-[hn:HAS_NAME]->(name:EntityName)
 				WHERE ($date > hn.from and (hn.until IS NULL OR $date < hn.until))
 			OPTIONAL MATCH (ent)-[hc:HAS_COUNTRY]->(country:Country)
 				WHERE ($date > hc.from and (hc.until IS NULL OR $date < hc.until))
-			RETURN ent as entity,collect(idns) as identifiers,name,country
+			RETURN ent as entity,collect(distinct(idns)) as identifiers,name,country,securities,security_identifiers
 		`)
 		qb.params["type"] = lookup.Identifier.Type
 		qb.params["value"] = lookup.Identifier.Value
@@ -264,8 +266,6 @@ func (a *Adapter) CreateEntities(ctx context.Context, entities []*resolve.Entity
 	}
 
 	qb := newQueryBuilder()
-
-	qb.WriteString("EXPLAIN ")
 
 	// create entities
 	for i, entity := range entities {
