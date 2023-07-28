@@ -41,15 +41,15 @@ func TestAdapter_CreateEntities(t *testing.T) {
 
 	gen := resolvetest.NewDataGen(1)
 
-	entityCount := 1000
+	entityCount := 10_000
 	testEntities := gen.NewEntities(entityCount)
 
-	batchsize := 100
+	batchsize := 500
 	var cursor int
 
 	for cursor < entityCount {
 		err = a.CreateEntities(ctx, testEntities[cursor:cursor+batchsize])
-		require.NoError(t, err)
+		require.NoError(t, err, fmt.Sprintf("error at cursor: %d", cursor))
 
 		cursor += batchsize
 		fmt.Printf("%s: cursor: %d\n", time.Now().Format("15:04:05"), cursor)

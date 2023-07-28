@@ -17,6 +17,14 @@ FOR (idn:Identifier) ON (idn.type,idn.value)
 CREATE INDEX identifies_roles IF NOT EXISTS
 FOR (it:IDENTIFIES) ON (it.roles)
 
+// Create unique constraint
+CREATE CONSTRAINT entity_id IF NOT EXISTS
+FOR (e:Entity) REQUIRE e.id IS UNIQUE
+
+// Create unique constraint on multiple properties (node key)
+CREATE CONSTRAINT identifier_type_value_node_key IF NOT EXISTS
+FOR (idn:Identifier) REQUIRE (idn.type,idn.value) IS NODE KEY
+
 // Get all entities with identifier relations
 MATCH (ent:Entity)<-[:IDENTIFIES]->(idns) RETURN ent,idns
 

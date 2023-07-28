@@ -47,13 +47,24 @@ func (a *Adapter) Cleanup(ctx context.Context) error {
 
 	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		_, err := tx.Run(ctx, `
+			DROP CONSTRAINT entity_id IF EXISTS
+			`, map[string]any{},
+		)
+		return nil, err
+	})
+	if err != nil {
+		return fmt.Errorf("execute drop identifier_type_value: %w", err)
+	}
+
+	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, `
 			DROP INDEX identifier_type_value IF EXISTS
 			`, map[string]any{},
 		)
 		return nil, err
 	})
 	if err != nil {
-		return fmt.Errorf("execute write: %w", err)
+		return fmt.Errorf("execute drop identifier_type_value: %w", err)
 	}
 
 	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
@@ -64,7 +75,7 @@ func (a *Adapter) Cleanup(ctx context.Context) error {
 		return nil, err
 	})
 	if err != nil {
-		return fmt.Errorf("execute write: %w", err)
+		return fmt.Errorf("execute drop identifier_duration: %w", err)
 	}
 
 	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
@@ -75,7 +86,51 @@ func (a *Adapter) Cleanup(ctx context.Context) error {
 		return nil, err
 	})
 	if err != nil {
-		return fmt.Errorf("execute write: %w", err)
+		return fmt.Errorf("execute delete: %w", err)
+	}
+
+	return nil
+}
+
+func createIndex(ctx context.Context, session neo4j.SessionWithContext) error {
+	var err error
+	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, `
+			CREATE CONSTRAINT entity_id IF NOT EXISTS
+			FOR (e:Entity) REQUIRE e.id IS UNIQUE
+			`, map[string]any{},
+		)
+		return nil, err
+	})
+	if err != nil {
+		return fmt.Errorf("create index entity_id: %w", err)
+	}
+
+	// Note - cannot add a unique constraint on identifier type,value as nodes are
+	// repeated when any of the identifiers in the group are changed.
+
+	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, `
+			CREATE INDEX identifier_type_value IF NOT EXISTS
+			FOR (idn:Identifier) ON (idn.type,idn.value)
+			`, map[string]any{},
+		)
+		return nil, err
+	})
+	if err != nil {
+		return fmt.Errorf("create index identifier_type_value: %w", err)
+	}
+
+	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, `
+			CREATE INDEX identifier_duration IF NOT EXISTS
+			FOR ()-[h:HAS_IDENTIFIER]-() ON (h.from,h.until)
+			`, map[string]any{},
+		)
+		return nil, err
+	})
+	if err != nil {
+		return fmt.Errorf("create index identifier_duration: %w", err)
 	}
 
 	return nil
@@ -86,6 +141,10 @@ func (a *Adapter) CreateEntities(ctx context.Context, entities []*resolve.Entity
 	defer session.Close(ctx)
 
 	var err error
+	err = createIndex(ctx, session)
+	if err != nil {
+		return err
+	}
 
 	qb := newQueryBuilder()
 
@@ -117,32 +176,6 @@ func (a *Adapter) CreateEntities(ctx context.Context, entities []*resolve.Entity
 		return fmt.Errorf("create entities: %w", err)
 	}
 
-	// TODO - can we speed up writes using an index?
-
-	// _, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-	// 	_, err := tx.Run(ctx, `
-	// 		CREATE INDEX identifier_type_value IF NOT EXISTS
-	// 		FOR (idn:Identifier) ON (idn.type,idn.value)
-	// 		`, map[string]any{},
-	// 	)
-	// 	return nil, err
-	// })
-	// if err != nil {
-	// 	return fmt.Errorf("create index: %w", err)
-	// }
-
-	// _, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-	// 	_, err := tx.Run(ctx, `
-	// 		CREATE INDEX identifier_duration IF NOT EXISTS
-	// 		FOR ()-[h:HAS_IDENTIFIER]-() ON (h.from,h.until)
-	// 		`, map[string]any{},
-	// 	)
-	// 	return nil, err
-	// })
-	// if err != nil {
-	// 	return fmt.Errorf("create index: %w", err)
-	// }
-
 	return nil
 }
 
@@ -158,8 +191,7 @@ func (qb *queryBuilder) writeEntityNames(entity *resolve.Entity, entityRef strin
 		}
 
 		qb.WriteString(fmt.Sprintf(`
-			CREATE (%[1]s:EntityName {value:$%[1]s})
-			CREATE (%[2]s)-[:HAS_NAME {from:$%[3]s%[4]s}]->(%[1]s)
+			CREATE (%[2]s)-[:HAS_NAME {from:$%[3]s%[4]s}]->(%[1]s:EntityName {value:$%[1]s})
 		`, entityNameKey, entityRef, entityNameKeyFrom, until))
 		qb.params[entityNameKey] = name.Detail.Value
 		qb.params[entityNameKeyFrom] = name.Duration.StartDate.Format(time.RFC3339)
@@ -181,8 +213,7 @@ func (qb *queryBuilder) writeEntityCountries(entity *resolve.Entity, entityRef s
 		}
 
 		qb.WriteString(fmt.Sprintf(`
-			CREATE (%[1]s:Country {value:$%[1]s})
-			CREATE (%[2]s)-[:HAS_COUNTRY {from:$%[3]s%[4]s}]->(%[1]s)
+			CREATE (%[2]s)-[:HAS_COUNTRY {from:$%[3]s%[4]s}]->(%[1]s:Country {value:$%[1]s})
 		`, entityCountryKey, entityRef, entityCountryKeyFrom, until))
 		qb.params[entityCountryKey] = country.Detail.Value
 		qb.params[entityCountryKeyFrom] = country.Duration.StartDate.Format(time.RFC3339)
@@ -198,15 +229,6 @@ func (qb *queryBuilder) writeEntityIdentifiers(entity *resolve.Entity, entityRef
 			entityIdentifierKey := fmt.Sprintf("entity_%d_duration_%d_identifier_%d", entityIndex, j, k)
 			entityIdentifierKeyType := fmt.Sprintf("%s_type", entityIdentifierKey)
 			entityIdentifierKeyValue := fmt.Sprintf("%s_value", entityIdentifierKey)
-
-			// create identifier nodes
-			qb.WriteString(fmt.Sprintf(`
-				CREATE (%[1]s:Identifier {type:$%[2]s,value:$%[3]s})
-			`, entityIdentifierKey, entityIdentifierKeyType, entityIdentifierKeyValue))
-			qb.params[entityIdentifierKeyType] = identifier.Type
-			qb.params[entityIdentifierKeyValue] = identifier.Value
-
-			// create identifier relations
 			entityIdentifierKeyFrom := fmt.Sprintf("%s_from", entityIdentifierKey)
 			entityIdentifierKeyUntil := fmt.Sprintf("%s_until", entityIdentifierKey)
 
@@ -216,8 +238,11 @@ func (qb *queryBuilder) writeEntityIdentifiers(entity *resolve.Entity, entityRef
 			}
 
 			qb.WriteString(fmt.Sprintf(`
-				CREATE (%[1]s)-[:HAS_IDENTIFIER {from:$%[2]s%[3]s}]->(%[4]s)
-			`, entityRef, entityIdentifierKeyFrom, until, entityIdentifierKey))
+				CREATE (%[1]s)-[:HAS_IDENTIFIER {from:$%[2]s%[3]s}]->(%[4]s:Identifier {type:$%[5]s,value:$%[6]s})
+			`, entityRef, entityIdentifierKeyFrom, until, entityIdentifierKey, entityIdentifierKeyType, entityIdentifierKeyValue))
+
+			qb.params[entityIdentifierKeyType] = identifier.Type
+			qb.params[entityIdentifierKeyValue] = identifier.Value
 
 			qb.params[entityIdentifierKeyFrom] = identifiersDurations.Duration.StartDate.Format(time.RFC3339)
 			if identifiersDurations.Duration.EndDate != nil {
@@ -232,14 +257,6 @@ func (qb *queryBuilder) writeEntitySecurities(entity *resolve.Entity, entityRef 
 		for k, security := range securitiesDurations.Detail {
 			entitySecurityKey := fmt.Sprintf("entity_%d_duration_%d_security_%d", entityIndex, j, k)
 			entitySecurityKeyName := fmt.Sprintf("%s_name", entitySecurityKey)
-
-			// create security node
-			qb.WriteString(fmt.Sprintf(`
-				CREATE (%[1]s:Security {name:$%[2]s})
-			`, entitySecurityKey, entitySecurityKeyName))
-			qb.params[entitySecurityKeyName] = security.Name
-
-			// create security relations
 			entitySecurityKeyFrom := fmt.Sprintf("%s_from", entitySecurityKey)
 			entitySecurityKeyUntil := fmt.Sprintf("%s_until", entitySecurityKey)
 
@@ -253,8 +270,10 @@ func (qb *queryBuilder) writeEntitySecurities(entity *resolve.Entity, entityRef 
 			}
 
 			qb.WriteString(fmt.Sprintf(`
-				CREATE (%[1]s)-[:HAS_SECURITY {from:$%[2]s%[3]s%[4]s}]->(%[5]s)
-			`, entityRef, entitySecurityKeyFrom, until, primary, entitySecurityKey))
+				CREATE (%[1]s)-[:HAS_SECURITY {from:$%[2]s%[3]s%[4]s}]->(%[5]s:Security {name:$%[6]s})
+			`, entityRef, entitySecurityKeyFrom, until, primary, entitySecurityKey, entitySecurityKeyName))
+
+			qb.params[entitySecurityKeyName] = security.Name
 
 			qb.params[entitySecurityKeyFrom] = securitiesDurations.Duration.StartDate.Format(time.RFC3339)
 			if securitiesDurations.Duration.EndDate != nil {
@@ -271,15 +290,6 @@ func (qb *queryBuilder) writeSecurityIdentifiers(securitiesDuration resolve.Dura
 		securityIdentifierKey := fmt.Sprintf("%s_identifier_%d", entitySecurityKey, j)
 		securityIdentifierKeyType := fmt.Sprintf("%s_type", securityIdentifierKey)
 		securityIdentifierKeyValue := fmt.Sprintf("%s_value", securityIdentifierKey)
-
-		// create identifier nodes
-		qb.WriteString(fmt.Sprintf(`
-			CREATE (%[1]s:Identifier {type:$%[2]s,value:$%[3]s})
-		`, securityIdentifierKey, securityIdentifierKeyType, securityIdentifierKeyValue))
-		qb.params[securityIdentifierKeyType] = identifier.Type
-		qb.params[securityIdentifierKeyValue] = identifier.Value
-
-		// create identifier relations
 		securityIdentifierKeyFrom := fmt.Sprintf("%s_from", securityIdentifierKey)
 		securityIdentifierKeyUntil := fmt.Sprintf("%s_until", securityIdentifierKey)
 
@@ -289,8 +299,11 @@ func (qb *queryBuilder) writeSecurityIdentifiers(securitiesDuration resolve.Dura
 		}
 
 		qb.WriteString(fmt.Sprintf(`
-			CREATE (%[1]s)-[:HAS_IDENTIFIER {from:$%[2]s%[3]s}]->(%[4]s)
-		`, entitySecurityKey, securityIdentifierKeyFrom, until, securityIdentifierKey))
+			CREATE (%[1]s)-[:HAS_IDENTIFIER {from:$%[2]s%[3]s}]->(%[4]s:Identifier {type:$%[5]s,value:$%[6]s})
+		`, entitySecurityKey, securityIdentifierKeyFrom, until, securityIdentifierKey, securityIdentifierKeyType, securityIdentifierKeyValue))
+
+		qb.params[securityIdentifierKeyType] = identifier.Type
+		qb.params[securityIdentifierKeyValue] = identifier.Value
 
 		qb.params[securityIdentifierKeyFrom] = securitiesDuration.StartDate.Format(time.RFC3339)
 		if securitiesDuration.EndDate != nil {
