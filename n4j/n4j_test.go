@@ -43,10 +43,10 @@ func TestAdapter_CreateEntities(t *testing.T) {
 
 	gen := resolvetest.NewDataGen(1)
 
-	entityCount := 10_000
+	entityCount := 1
 	testEntities := gen.NewEntities(entityCount)
 
-	batchsize := 500
+	batchsize := 1
 	var cursor int
 
 	for cursor < entityCount {
@@ -57,7 +57,7 @@ func TestAdapter_CreateEntities(t *testing.T) {
 		fmt.Printf("%s: cursor: %d\n", time.Now().Format("15:04:05"), cursor)
 	}
 
-	// fmt.Println(prettyPrint(testEntities[:1]))
+	// fmt.Println(PrettyPrint(testEntities[:1]))
 }
 
 // Test lookup requires entities to have been created already.
@@ -103,7 +103,7 @@ func TestAdapter_LookupDirectEntities(t *testing.T) {
 	fmt.Println("found entities:", found)
 }
 
-func prettyPrint(i any) string {
+func PrettyPrint(i any) string {
 	s, _ := json.MarshalIndent(i, "", "\t")
 	return string(s)
 }

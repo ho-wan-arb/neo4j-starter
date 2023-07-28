@@ -57,3 +57,24 @@ RETURN ent as entity,collect(idns) as identifiers,name
 
 // Delete all nodes
 MATCH (n) DETACH DELETE n
+
+// Profile raw query to create entity with params replaced
+PROFILE
+CREATE (entity_0:Entity {id:'4f163f5f-0f9a-421d-b295-66c74d10037c'})
+CREATE (entity_0)-[:HAS_NAME {from:'2020-04-27T00:00:00Z',until:'2023-03-31T00:00:00Z'}]->(entity_0_name_0:EntityName {value:'Stevens Worldwide Van Lines'})
+CREATE (entity_0)-[:HAS_NAME {from:'2023-03-31T00:00:00Z',until:'2023-05-29T00:00:00Z'}]->(entity_0_name_1:EntityName {value:'FlightAware'})
+CREATE (entity_0)-[:HAS_NAME {from:'2023-05-29T00:00:00Z'}]->(entity_0_name_2:EntityName {value:'Forrester Research'})
+CREATE (entity_0)-[:HAS_COUNTRY {from:'2020-04-27T00:00:00Z'}]->(entity_0_country_0:Country {value:'Solomon Islands'})
+CREATE (entity_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_identifier_0:Identifier {type:'resolve_id',value:'4d7bbb04-0736-4951-baa2-ff6cd471c483'})
+CREATE (entity_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_identifier_1:Identifier {type:'sray_entity_id',value:'1'})
+CREATE (entity_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_identifier_2:Identifier {type:'fs_entity_id',value:'000001-E'})
+CREATE (entity_0)-[:HAS_SECURITY {from:'2020-04-27T00:00:00Z',primary:true}]->(entity_0_duration_0_security_0:Security {name:'clean horde'})
+CREATE (entity_0_duration_0_security_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_0_identifier_0:Identifier {type:'asset_id',value:'1'})
+CREATE (entity_0_duration_0_security_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_0_identifier_1:Identifier {type:'isin',value:'DEK1HH2GDN09'})
+CREATE (entity_0_duration_0_security_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_0_identifier_2:Identifier {type:'cusip',value:'XXVI7HVS0'})
+CREATE (entity_0)-[:HAS_SECURITY {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_1:Security {name:'these sedge'})
+CREATE (entity_0_duration_0_security_1)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_1_identifier_0:Identifier {type:'asset_id',value:'2'})
+CREATE (entity_0_duration_0_security_1)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_1_identifier_1:Identifier {type:'isin',value:'SC82TVJZJP78'})
+CREATE (entity_0)-[:HAS_SECURITY {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_2:Security {name:'where villa'})
+CREATE (entity_0_duration_0_security_2)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_2_identifier_0:Identifier {type:'asset_id',value:'3'})
+CREATE (entity_0_duration_0_security_2)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_2_identifier_1:Identifier {type:'cusip',value:'VMKIR0XC6'})

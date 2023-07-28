@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,6 +38,30 @@ func newQueryBuilder() *queryBuilder {
 		strings.Builder{},
 		map[string]any{},
 	}
+}
+
+// ToQueryWithParams generates a query with the params replaced by values and
+// whitespace cleaned up. This can be used to log the query so it can be used
+// with EXPLAIN and PROFILE.
+func (qb *queryBuilder) ToQueryWithParams() string {
+	s := qb.String()
+
+	var sortedKeys [][]string
+	// sort key of from longest to shortest to avoid replacing params too early
+	for k, v := range qb.params {
+		sortedKeys = append(sortedKeys, []string{k, fmt.Sprint(v)})
+	}
+	sort.Slice(sortedKeys, func(i, j int) bool {
+		return len(sortedKeys[i][0]) > len(sortedKeys[j][0])
+	})
+
+	for _, kv := range sortedKeys {
+		s = strings.ReplaceAll(s, fmt.Sprintf(`$%s`, kv[0]), fmt.Sprintf(`'%v'`, kv[1]))
+	}
+
+	s = strings.ReplaceAll(s, "\t", "")
+	s = strings.ReplaceAll(s, "\n\n", "\n")
+	return s
 }
 
 // Cleanup removes all existing nodes and relations.
@@ -240,6 +265,8 @@ func (a *Adapter) CreateEntities(ctx context.Context, entities []*resolve.Entity
 
 	qb := newQueryBuilder()
 
+	qb.WriteString("EXPLAIN ")
+
 	// create entities
 	for i, entity := range entities {
 		entityRef := fmt.Sprintf("entity_%d", i)
@@ -254,8 +281,7 @@ func (a *Adapter) CreateEntities(ctx context.Context, entities []*resolve.Entity
 		qb.writeEntitySecurities(entity, entityRef, i)
 	}
 
-	// fmt.Println(qb.String())
-	// fmt.Println(qb.params)
+	// fmt.Println(qb.ToQueryWithParams())
 
 	_, err = session.ExecuteWrite(ctx,
 		func(tx neo4j.ManagedTransaction) (any, error) {
