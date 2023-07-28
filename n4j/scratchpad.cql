@@ -34,12 +34,26 @@ MATCH (idn:Identifier{type:'isin',value:'isin-1'})<-[:IDENTIFIES]->(ent) RETURN 
 // Get entity returning primary identifiers only
 MATCH (idn:Identifier{type:'isin'})<-[:IDENTIFIES]->(ent)<-[it:IDENTIFIES]-(i) WHERE 'primary_identifier' IN it.roles RETURN ent,it.roles,i
 
-// Get entity with all identifiers matching requested identifier
-MATCH (idn:Identifier{type:'isin',value:'isin-1'}) --(ent) --(i:Identifier)
+// Set parameter (has to be separate query)
+:param date => '2023-02-09T00:00:00Z'
+
+// Get entity with all identifiers matching requested identifier for given date
+MATCH (idn:Identifier{type:$type,value:$value})<--(ent:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
+WHERE ($date > hi.from and (hi.until IS NULL OR $date < hi.until))
 WITH ent,collect(distinct(idn)) + collect(i) as ii
 UNWIND ii as idns
-RETURN ent,idns
-ORDER BY idns.type,idns.value
+RETURN ent as entity,collect(idns) as identifiers
+
+// Optional match
+MATCH (idn:Identifier{type:$type,value:$value})<--(ent:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
+WHERE ($date > hi.from and (hi.until IS NULL OR $date < hi.until))
+WITH ent,collect(distinct(idn)) + collect(i) as ii
+UNWIND ii as idns
+OPTIONAL MATCH (ent)-[hn:HAS_NAME]->(name:EntityName)
+WHERE ($date > hn.from and (hn.until IS NULL OR $date < hn.until))
+OPTIONAL MATCH (ent)-[hc:HAS_COUNTRY]->(country:Country)
+WHERE ($date > hc.from and (hc.until IS NULL OR $date < hc.until))
+RETURN ent as entity,collect(idns) as identifiers,name
 
 // Delete all nodes
 MATCH (n) DETACH DELETE n

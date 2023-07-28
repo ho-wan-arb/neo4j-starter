@@ -9,6 +9,7 @@ import (
 
 	"neo4j-starter/resolve"
 
+	"github.com/gofrs/uuid"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -134,6 +135,97 @@ func createIndex(ctx context.Context, session neo4j.SessionWithContext) error {
 	}
 
 	return nil
+}
+
+// LookupDirectEntities looks up identifiers directly connected to entities such
+// as entity_id, and does not support security identifiers.
+func (a *Adapter) LookupDirectEntities(ctx context.Context, lookups []resolve.Lookup) ([]resolve.LookupResult, error) {
+	session := a.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: dbName, AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	lookupResults := make([]resolve.LookupResult, 0, len(lookups))
+
+	timerStart := time.Now()
+
+	for _, lookup := range lookups {
+		qb := newQueryBuilder()
+
+		qb.WriteString(`
+			MATCH (idn:Identifier{type:$type,value:$value})<--(ent:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
+				WHERE ($date > hi.from and (hi.until IS NULL OR $date < hi.until))
+			WITH ent,collect(distinct(idn)) + collect(i) as ii
+				UNWIND ii as idns
+			OPTIONAL MATCH (ent)-[hn:HAS_NAME]->(name:EntityName)
+				WHERE ($date > hn.from and (hn.until IS NULL OR $date < hn.until))
+			OPTIONAL MATCH (ent)-[hc:HAS_COUNTRY]->(country:Country)
+				WHERE ($date > hc.from and (hc.until IS NULL OR $date < hc.until))
+			RETURN ent as entity,collect(idns) as identifiers,name,country
+		`)
+		qb.params["type"] = lookup.Identifier.Type
+		qb.params["value"] = lookup.Identifier.Value
+		qb.params["date"] = lookup.Date.Format(time.RFC3339)
+
+		var found bool
+
+		ent, err := neo4j.ExecuteRead(ctx, session,
+			func(tx neo4j.ManagedTransaction) (*resolve.Entity, error) {
+				result, err := tx.Run(ctx, qb.String(), qb.params)
+				if err != nil {
+					return nil, fmt.Errorf("run: %w", err)
+				}
+
+				var res resolve.Entity
+
+				record, err := result.Single(ctx)
+				if err != nil {
+					// ignore error if not found
+					return nil, nil
+				}
+
+				rawEntity, ok := record.Get("entity")
+				if ok {
+					found = true
+					entityNode, _ := rawEntity.(neo4j.Node)
+
+					res.ID = uuid.FromStringOrNil(fmt.Sprint(entityNode.Props["id"]))
+				}
+
+				rawName, _ := record.Get("name")
+				if ok {
+					nameNode, _ := rawName.(neo4j.Node)
+					name, ok := nameNode.Props["value"]
+					if ok {
+						s := name.(string)
+						res.Name = []resolve.DetailDuration[resolve.EntityName]{
+							{
+								Detail: resolve.EntityName{
+									Value: s,
+								},
+							},
+						}
+					}
+
+				}
+				// For now, only the entity ID and name is mapped to result
+				_, _ = record.Get("country")
+				_, _ = record.Get("identifiers")
+
+				return &res, err
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("lookup direct entities: %w", err)
+		}
+
+		lookupResults = append(lookupResults, resolve.LookupResult{
+			Success: found,
+			Entity:  ent,
+		})
+	}
+
+	fmt.Printf("time taken: %v\n", time.Since(timerStart))
+
+	return lookupResults, nil
 }
 
 func (a *Adapter) CreateEntities(ctx context.Context, entities []*resolve.Entity) error {

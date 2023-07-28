@@ -55,7 +55,7 @@ type Lookup struct {
 
 type LookupResult struct {
 	Success bool
-	Entity  Entity
+	Entity  *Entity
 }
 
 func ResolveEntities(request []Lookup) ([]LookupResult, error) {
