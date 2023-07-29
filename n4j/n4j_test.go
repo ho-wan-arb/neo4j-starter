@@ -2,8 +2,8 @@ package n4j
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -42,18 +42,20 @@ func TestAdapter_CreateEntities(t *testing.T) {
 
 	gen := resolvetest.NewDataGen(1)
 
-	entityCount := 100
+	entityCount := 10_000
 	testEntities := gen.NewEntities(entityCount)
 
-	batchsize := 10
+	batchsize := 1000
 	var cursor int
 
 	for cursor < entityCount {
-		err = a.CreateEntities(ctx, testEntities[cursor:cursor+batchsize])
+		fmt.Printf("%s: cursor: %d\n", time.Now().Format("15:04:05"), cursor)
+
+		max := int(math.Min(float64(entityCount), float64(cursor+batchsize)))
+		err = a.CreateEntities(ctx, testEntities[cursor:max])
 		require.NoError(t, err, fmt.Sprintf("error at cursor: %d", cursor))
 
 		cursor += batchsize
-		fmt.Printf("%s: cursor: %d\n", time.Now().Format("15:04:05"), cursor)
 	}
 
 	// fmt.Println(PrettyPrint(testEntities[:1]))
@@ -100,9 +102,4 @@ func TestAdapter_LookupDirectEntities(t *testing.T) {
 		}
 	}
 	fmt.Println("found entities:", found)
-}
-
-func PrettyPrint(i any) string {
-	s, _ := json.MarshalIndent(i, "", "\t")
-	return string(s)
 }

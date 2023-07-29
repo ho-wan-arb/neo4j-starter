@@ -2,6 +2,7 @@ package n4j
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
@@ -42,7 +43,7 @@ func newQueryBuilder() *queryBuilder {
 
 // ToQueryWithParams generates a query with the params replaced by values and
 // whitespace cleaned up. This can be used to log the query so it can be used
-// with EXPLAIN and PROFILE.
+// with EXPLAIN and PROFILE. However it does not work with slices.
 func (qb *queryBuilder) ToQueryWithParams() string {
 	s := qb.String()
 
@@ -104,13 +105,14 @@ func (a *Adapter) Cleanup(ctx context.Context) error {
 		return fmt.Errorf("execute drop identifier_duration: %w", err)
 	}
 
-	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		_, err := tx.Run(ctx, `
-			MATCH (n) DETACH DELETE n
-			`, map[string]any{},
-		)
-		return nil, err
-	})
+	// Use implicit transactions to delete nodes in batches
+	_, err = session.Run(ctx, `
+		MATCH (n)
+		CALL {
+			WITH n
+			DETACH DELETE n
+		} IN TRANSACTIONS OF 10000 ROWS
+	`, nil, neo4j.WithTxTimeout(5*time.Minute))
 	if err != nil {
 		return fmt.Errorf("execute delete: %w", err)
 	}
@@ -132,9 +134,9 @@ func createIndex(ctx context.Context, session neo4j.SessionWithContext) error {
 		return fmt.Errorf("create index entity_id: %w", err)
 	}
 
-	// Note - cannot add a unique constraint on identifier type,value as nodes are
-	// repeated when any of the identifiers in the group are changed.
-
+	// Can also use NODE KEY to enforce a unique constraint on identifier type,value
+	// But this is an enterprise feature. The index speeds up lookup but cannot
+	// enforce uniqueness.
 	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		_, err := tx.Run(ctx, `
 			CREATE INDEX identifier_type_value IF NOT EXISTS
@@ -267,19 +269,88 @@ func (a *Adapter) CreateEntities(ctx context.Context, entities []*resolve.Entity
 
 	qb := newQueryBuilder()
 
-	// create entities
-	for i, entity := range entities {
-		entityRef := fmt.Sprintf("entity_%d", i)
-		qb.WriteString(fmt.Sprintf(`
-			CREATE (%[1]s:Entity {id:$%[1]s})
-		`, entityRef))
-		qb.params[entityRef] = entity.ID.String()
+	// create entity, name, entity identifiers
+	// TODO - country
+	entityList := make([][]any, 0, len(entities))
+	for _, entity := range entities {
+		// ideally would be able to define schema using types, but it seems the
+		// n4j driver only accepts arrays and maps, and not structs
+		// 'any' is required in order to support nulls
 
-		qb.writeEntityNames(entity, entityRef, i)
-		qb.writeEntityCountries(entity, entityRef, i)
-		qb.writeEntityIdentifiers(entity, entityRef, i)
-		qb.writeEntitySecurities(entity, entityRef, i)
+		// nameDurations: [][]{name, from, until(opt)}
+		nameDurations := make([][]any, 0, len(entity.Name))
+		for _, nameDuration := range entity.Name {
+			nameDurations = append(nameDurations, []any{
+				nameDuration.Detail.Value,
+				dateToOptionalString(&nameDuration.Duration.StartDate),
+				dateToOptionalString(nameDuration.Duration.EndDate),
+			})
+		}
+
+		// identifierDurations: [][]{[]string{idn_type,idn_value},from,until(opt)}
+		identifierDurations := make([][]any, 0, len(entity.Identifiers))
+		for _, identifierDuration := range entity.Identifiers {
+			idns := make([][]string, 0, len(identifierDuration.Detail))
+			for _, idn := range identifierDuration.Detail {
+				idns = append(idns, []string{string(idn.Type), idn.Value})
+			}
+			identifierDurations = append(identifierDurations, []any{
+				idns,
+				dateToOptionalString(&identifierDuration.Duration.StartDate),
+				dateToOptionalString(identifierDuration.Duration.EndDate),
+			})
+		}
+
+		// securityDurations: [][]{name,from,until(opt),[][]string{idn_type,idn_value}}
+		securityDurations := make([]any, 0, len(entity.Securities))
+		for _, secDuration := range entity.Securities {
+			securities := make([]any, 0, len(secDuration.Detail))
+			for _, sec := range secDuration.Detail {
+				idns := make([][]string, 0, len(sec.Identifiers))
+				for _, idn := range sec.Identifiers {
+					idns = append(idns, []string{string(idn.Type), idn.Value})
+				}
+
+				securities = append(securities, []any{
+					sec.Name,
+					dateToOptionalString(&secDuration.Duration.StartDate),
+					dateToOptionalString(secDuration.Duration.EndDate),
+					idns,
+				})
+			}
+			securityDurations = append(securityDurations, securities)
+		}
+
+		e := []any{entity.ID.String(), nameDurations, identifierDurations, securityDurations}
+
+		entityList = append(entityList, e)
 	}
+
+	qb.WriteString(`
+		WITH $entityList as entities
+		UNWIND entities AS e
+		CREATE (ent:Entity {id: e[0]})
+		FOREACH (nd IN e[1] | CREATE (ent)-[:HAS_NAME {from: nd[1], until: nd[2]}]->(:Name {value: nd[0]}))
+		FOREACH (idnd IN e[2] |
+			FOREACH (idn IN idnd[0] |
+				MERGE (im:Identifier {type: idn[0],value: idn[1]})
+				CREATE (ent)-[:HAS_IDENTIFIER {from: idnd[1], until: idnd[2]}]->(im)
+			)
+		)
+		FOREACH (s IN e[3] |
+			FOREACH (sd IN s |
+				CREATE (ent)-[:HAS_SECURITY {from: sd[1], until: sd[2]}]->(sec:Security {name: sd[0]})
+				FOREACH (idn IN sd[3] |
+					MERGE (im:Identifier {type: idn[0],value: idn[1]})
+					CREATE (sec)-[:HAS_IDENTIFIER]->(im)
+				)
+			)
+		)
+	`)
+	qb.params["entityList"] = entityList
+
+	// note: we could put duration on security identifier instead of security, so
+	// that lookup can use the identifier link similar to entity identifier
 
 	// fmt.Println(qb.ToQueryWithParams())
 
@@ -297,137 +368,12 @@ func (a *Adapter) CreateEntities(ctx context.Context, entities []*resolve.Entity
 	return nil
 }
 
-func (qb *queryBuilder) writeEntityNames(entity *resolve.Entity, entityRef string, entityIndex int) {
-	for j, name := range entity.Name {
-		entityNameKey := fmt.Sprintf("entity_%d_name_%d", entityIndex, j)
-		entityNameKeyFrom := fmt.Sprintf("%s_from", entityNameKey)
-		entityNameKeyUntil := fmt.Sprintf("%s_until", entityNameKey)
-
-		var until string
-		if name.Duration.EndDate != nil {
-			until = fmt.Sprintf(",until:$%s", entityNameKeyUntil)
-		}
-
-		qb.WriteString(fmt.Sprintf(`
-			CREATE (%[2]s)-[:HAS_NAME {from:$%[3]s%[4]s}]->(%[1]s:EntityName {value:$%[1]s})
-		`, entityNameKey, entityRef, entityNameKeyFrom, until))
-		qb.params[entityNameKey] = name.Detail.Value
-		qb.params[entityNameKeyFrom] = name.Duration.StartDate.Format(time.RFC3339)
-		if name.Duration.EndDate != nil {
-			qb.params[entityNameKeyUntil] = name.Duration.EndDate.Format(time.RFC3339)
-		}
+func dateToOptionalString(d *time.Time) *string {
+	if d == nil {
+		return nil
 	}
-}
-
-func (qb *queryBuilder) writeEntityCountries(entity *resolve.Entity, entityRef string, entityIndex int) {
-	for j, country := range entity.Country {
-		entityCountryKey := fmt.Sprintf("entity_%d_country_%d", entityIndex, j)
-		entityCountryKeyFrom := fmt.Sprintf("%s_from", entityCountryKey)
-		entityCountryKeyUntil := fmt.Sprintf("%s_until", entityCountryKey)
-
-		var until string
-		if country.Duration.EndDate != nil {
-			until = fmt.Sprintf(",until:$%s", entityCountryKeyUntil)
-		}
-
-		qb.WriteString(fmt.Sprintf(`
-			CREATE (%[2]s)-[:HAS_COUNTRY {from:$%[3]s%[4]s}]->(%[1]s:Country {value:$%[1]s})
-		`, entityCountryKey, entityRef, entityCountryKeyFrom, until))
-		qb.params[entityCountryKey] = country.Detail.Value
-		qb.params[entityCountryKeyFrom] = country.Duration.StartDate.Format(time.RFC3339)
-		if country.Duration.EndDate != nil {
-			qb.params[entityCountryKeyUntil] = country.Duration.EndDate.Format(time.RFC3339)
-		}
-	}
-}
-
-func (qb *queryBuilder) writeEntityIdentifiers(entity *resolve.Entity, entityRef string, entityIndex int) {
-	for j, identifiersDurations := range entity.Identifiers {
-		for k, identifier := range identifiersDurations.Detail {
-			entityIdentifierKey := fmt.Sprintf("entity_%d_duration_%d_identifier_%d", entityIndex, j, k)
-			entityIdentifierKeyType := fmt.Sprintf("%s_type", entityIdentifierKey)
-			entityIdentifierKeyValue := fmt.Sprintf("%s_value", entityIdentifierKey)
-			entityIdentifierKeyFrom := fmt.Sprintf("%s_from", entityIdentifierKey)
-			entityIdentifierKeyUntil := fmt.Sprintf("%s_until", entityIdentifierKey)
-
-			var until string
-			if identifiersDurations.Duration.EndDate != nil {
-				until = fmt.Sprintf(",until:$%s", entityIdentifierKeyUntil)
-			}
-
-			qb.WriteString(fmt.Sprintf(`
-				CREATE (%[1]s)-[:HAS_IDENTIFIER {from:$%[2]s%[3]s}]->(%[4]s:Identifier {type:$%[5]s,value:$%[6]s})
-			`, entityRef, entityIdentifierKeyFrom, until, entityIdentifierKey, entityIdentifierKeyType, entityIdentifierKeyValue))
-
-			qb.params[entityIdentifierKeyType] = identifier.Type
-			qb.params[entityIdentifierKeyValue] = identifier.Value
-
-			qb.params[entityIdentifierKeyFrom] = identifiersDurations.Duration.StartDate.Format(time.RFC3339)
-			if identifiersDurations.Duration.EndDate != nil {
-				qb.params[entityIdentifierKeyUntil] = identifiersDurations.Duration.EndDate.Format(time.RFC3339)
-			}
-		}
-	}
-}
-
-func (qb *queryBuilder) writeEntitySecurities(entity *resolve.Entity, entityRef string, entityIndex int) {
-	for j, securitiesDurations := range entity.Securities {
-		for k, security := range securitiesDurations.Detail {
-			entitySecurityKey := fmt.Sprintf("entity_%d_duration_%d_security_%d", entityIndex, j, k)
-			entitySecurityKeyName := fmt.Sprintf("%s_name", entitySecurityKey)
-			entitySecurityKeyFrom := fmt.Sprintf("%s_from", entitySecurityKey)
-			entitySecurityKeyUntil := fmt.Sprintf("%s_until", entitySecurityKey)
-
-			var until string
-			if securitiesDurations.Duration.EndDate != nil {
-				until = fmt.Sprintf(",until:$%s", entitySecurityKeyUntil)
-			}
-			var primary string
-			if security.IsPrimary {
-				primary = ",primary:true"
-			}
-
-			qb.WriteString(fmt.Sprintf(`
-				CREATE (%[1]s)-[:HAS_SECURITY {from:$%[2]s%[3]s%[4]s}]->(%[5]s:Security {name:$%[6]s})
-			`, entityRef, entitySecurityKeyFrom, until, primary, entitySecurityKey, entitySecurityKeyName))
-
-			qb.params[entitySecurityKeyName] = security.Name
-
-			qb.params[entitySecurityKeyFrom] = securitiesDurations.Duration.StartDate.Format(time.RFC3339)
-			if securitiesDurations.Duration.EndDate != nil {
-				qb.params[entitySecurityKeyUntil] = securitiesDurations.Duration.EndDate.Format(time.RFC3339)
-			}
-
-			qb.writeSecurityIdentifiers(securitiesDurations.Duration, security, entitySecurityKey)
-		}
-	}
-}
-
-func (qb *queryBuilder) writeSecurityIdentifiers(securitiesDuration resolve.Duration, security resolve.Security, entitySecurityKey string) {
-	for j, identifier := range security.Identifiers {
-		securityIdentifierKey := fmt.Sprintf("%s_identifier_%d", entitySecurityKey, j)
-		securityIdentifierKeyType := fmt.Sprintf("%s_type", securityIdentifierKey)
-		securityIdentifierKeyValue := fmt.Sprintf("%s_value", securityIdentifierKey)
-		securityIdentifierKeyFrom := fmt.Sprintf("%s_from", securityIdentifierKey)
-		securityIdentifierKeyUntil := fmt.Sprintf("%s_until", securityIdentifierKey)
-
-		var until string
-		if securitiesDuration.EndDate != nil {
-			until = fmt.Sprintf(",until:$%s", securityIdentifierKeyUntil)
-		}
-
-		qb.WriteString(fmt.Sprintf(`
-			CREATE (%[1]s)-[:HAS_IDENTIFIER {from:$%[2]s%[3]s}]->(%[4]s:Identifier {type:$%[5]s,value:$%[6]s})
-		`, entitySecurityKey, securityIdentifierKeyFrom, until, securityIdentifierKey, securityIdentifierKeyType, securityIdentifierKeyValue))
-
-		qb.params[securityIdentifierKeyType] = identifier.Type
-		qb.params[securityIdentifierKeyValue] = identifier.Value
-
-		qb.params[securityIdentifierKeyFrom] = securitiesDuration.StartDate.Format(time.RFC3339)
-		if securitiesDuration.EndDate != nil {
-			qb.params[securityIdentifierKeyUntil] = securitiesDuration.EndDate.Format(time.RFC3339)
-		}
-	}
+	s := d.UTC().Format(time.RFC3339)
+	return &s
 }
 
 func Connect(ctx context.Context) (neo4j.DriverWithContext, func(), error) {
@@ -454,4 +400,9 @@ func Connect(ctx context.Context) (neo4j.DriverWithContext, func(), error) {
 	}
 
 	return driver, cleanup, nil
+}
+
+func PrettyPrint(i any) string {
+	s, _ := json.MarshalIndent(i, "", "\t")
+	return string(s)
 }
