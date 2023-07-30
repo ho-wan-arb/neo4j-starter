@@ -164,6 +164,110 @@ func createIndex(ctx context.Context, session neo4j.SessionWithContext) error {
 	return nil
 }
 
+func (a *Adapter) LookupEntities(ctx context.Context, lookups []resolve.Lookup) ([]resolve.LookupResult, error) {
+	session := a.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: dbName, AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	timerStart := time.Now()
+
+	lookupList := make([][]any, 0, len(lookups))
+	for _, lookup := range lookups {
+		lookupList = append(lookupList, []any{
+			string(lookup.Identifier.Type),
+			lookup.Identifier.Value,
+			dateToOptionalString(lookup.Date), // can be null
+		})
+	}
+
+	// TODO - support lookup of securitiy identifier
+	qb := newQueryBuilder()
+	qb.WriteString(`
+		WITH $lookupList as lookups
+		UNWIND lookups AS lookup
+		OPTIONAL MATCH (idn:Identifier {type: lookup[0],value: lookup[1]})<--(entity:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
+			WHERE (hi.from <= lookup[2] and (hi.until IS NULL OR lookup[2] < hi.until))
+		OPTIONAL MATCH (entity)-[hn:HAS_NAME]->(name:Name)
+			WHERE (hn.from <= lookup[2] and (hn.until IS NULL OR lookup[2] < hn.until))
+		OPTIONAL MATCH (entity)-[hs:HAS_SECURITY]->(security:Security)-->(si:Identifier)
+			WHERE (hs.from <= lookup[2] and (hs.until IS NULL OR lookup[2] < hs.until))
+		RETURN lookup, entity, (collect(i)+collect(idn)) as identifiers, name, collect(security), collect(si) as security_identifiers
+	`)
+	qb.params["lookupList"] = lookupList
+
+	res, err := neo4j.ExecuteRead(ctx, session,
+		func(tx neo4j.ManagedTransaction) ([]resolve.LookupResult, error) {
+			result, err := tx.Run(ctx, qb.String(), qb.params)
+			if err != nil {
+				return nil, fmt.Errorf("run: %w", err)
+			}
+
+			lookups := make([]resolve.LookupResult, 0, len(lookups))
+
+			for result.Next(ctx) {
+				var entity resolve.Entity
+
+				record := result.Record()
+
+				entityNode, _, err := neo4j.GetRecordValue[neo4j.Node](record, "entity")
+				if err != nil {
+					return nil, fmt.Errorf("get record value for entity: %w", err)
+				}
+
+				id, err := neo4j.GetProperty[string](entityNode, "id")
+				if err != nil {
+					lookups = append(lookups, resolve.LookupResult{
+						Success: false,
+					})
+					continue
+				}
+
+				entity.ID, err = uuid.FromString(id)
+				if err != nil {
+					return nil, fmt.Errorf("uuid from string: %w", err)
+				}
+
+				entityNode, _, err = neo4j.GetRecordValue[neo4j.Node](record, "name")
+				if err == nil {
+					name, ok := entityNode.Props["value"]
+					if ok {
+						s := name.(string)
+						entity.Name = []resolve.DetailDuration[resolve.EntityName]{
+							{
+								Detail: resolve.EntityName{
+									Value: s,
+								},
+							},
+						}
+					}
+
+				}
+				// TODO - country not yet set
+
+				// TODO - map identifiers, security, security identifers in result
+				_, _ = record.Get("identifiers")
+				_, _ = record.Get("security_identifiers")
+
+				lookups = append(lookups, resolve.LookupResult{
+					Success: true,
+					Entity:  &entity,
+				})
+			}
+
+			if err = result.Err(); err != nil {
+				return nil, fmt.Errorf("result error: %w", err)
+			}
+
+			return lookups, err
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("lookup direct entities: %w", err)
+	}
+	fmt.Printf("time taken: %v\n", time.Since(timerStart))
+
+	return res, nil
+}
+
 // LookupDirectEntities looks up identifiers directly connected to entities such
 // as entity_id, and does not support security identifiers.
 func (a *Adapter) LookupDirectEntities(ctx context.Context, lookups []resolve.Lookup) ([]resolve.LookupResult, error) {

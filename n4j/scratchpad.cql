@@ -25,6 +25,9 @@ FOR (e:Entity) REQUIRE e.id IS UNIQUE
 CREATE CONSTRAINT identifier_type_value_node_key IF NOT EXISTS
 FOR (idn:Identifier) REQUIRE (idn.type,idn.value) IS NODE KEY
 
+// Delete all nodes
+MATCH (n) DETACH DELETE n
+
 // Get all entities with identifier relations
 MATCH (ent:Entity)<-[:IDENTIFIES]->(idns) RETURN ent,idns
 
@@ -57,8 +60,17 @@ OPTIONAL MATCH (ent)-[hc:HAS_COUNTRY]->(country:Country)
     WHERE ($date > hc.from and (hc.until IS NULL OR $date < hc.until))
 RETURN ent as entity,collect(distinct(idns)) as identifiers,name,country,securities,security_identifiers
 
-// Delete all nodes
-MATCH (n) DETACH DELETE n
+// Lookup using array
+
+WITH [['sray_entity_id','0','2023-02-09T00:00:00Z'],['sray_entity_id','5','2023-02-09T00:00:00Z'],['sray_entity_id','6','2023-02-09T00:00:00Z'],['sray_entity_id','7','2023-02-09T00:00:00Z']] AS lookups
+UNWIND lookups AS lookup
+OPTIONAL MATCH (idn:Identifier {type: lookup[0],value: lookup[1]})<--(entity:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
+    WHERE (hi.from <= lookup[2] and (hi.until IS NULL OR lookup[2] < hi.until))
+OPTIONAL MATCH (entity)-[hn:HAS_NAME]->(name:Name)
+    WHERE (hn.from <= lookup[2] and (hn.until IS NULL OR lookup[2] < hn.until))
+OPTIONAL MATCH (entity)-[hs:HAS_SECURITY]->(security:Security)-->(si:Identifier)
+    WHERE (hs.from <= lookup[2] and (hs.until IS NULL OR lookup[2] < hs.until))
+RETURN lookup, entity, (collect(i)+collect(idn)) as identifiers, name, collect(security), collect(si) as security_identifiers
 
 // Profile raw query to create entity with params replaced
 

@@ -49,7 +49,7 @@ type Security struct {
 }
 
 type Lookup struct {
-	Date       time.Time
+	Date       *time.Time
 	Identifier Identifier
 }
 

@@ -10,6 +10,7 @@ import (
 	"neo4j-starter/resolve"
 	"neo4j-starter/resolve/resolvetest"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,7 +43,7 @@ func TestAdapter_CreateEntities(t *testing.T) {
 
 	gen := resolvetest.NewDataGen(1)
 
-	entityCount := 10_000
+	entityCount := 100_000
 	testEntities := gen.NewEntities(entityCount)
 
 	batchsize := 1000
@@ -62,7 +63,7 @@ func TestAdapter_CreateEntities(t *testing.T) {
 }
 
 // Test lookup requires entities to have been created already.
-func TestAdapter_LookupDirectEntities(t *testing.T) {
+func TestAdapter_LookupEntities(t *testing.T) {
 	ctx := context.Background()
 
 	driver, cleanup, err := Connect(ctx)
@@ -74,14 +75,15 @@ func TestAdapter_LookupDirectEntities(t *testing.T) {
 	lookupDate, err := time.Parse(time.RFC3339, "2023-02-09T00:00:00Z")
 	require.NoError(t, err)
 
-	// entity ids should have been created in the DB already
 	// const maxSrayEntityID = 1000
 	const lookupCount = 1000
+
+	// rand.Seed(1)
 
 	var lookups []resolve.Lookup
 	for i := 0; i < lookupCount; i++ {
 		lookup := resolve.Lookup{
-			Date: lookupDate,
+			Date: &lookupDate,
 			Identifier: resolve.Identifier{
 				Type: "sray_entity_id",
 				// Value: fmt.Sprint(rand.Intn(maxSrayEntityID)),
@@ -91,9 +93,9 @@ func TestAdapter_LookupDirectEntities(t *testing.T) {
 		lookups = append(lookups, lookup)
 	}
 
-	lookupResults, err := a.LookupDirectEntities(ctx, lookups)
+	lookupResults, err := a.LookupEntities(ctx, lookups)
 	require.NoError(t, err)
-	require.Len(t, lookupResults, lookupCount)
+	assert.Equal(t, len(lookups), len(lookupResults), "should get same count as in lookup")
 
 	var found int
 	for _, res := range lookupResults {
