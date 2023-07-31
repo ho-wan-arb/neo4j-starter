@@ -97,3 +97,36 @@ func TestAdapter_LookupEntities(t *testing.T) {
 	}
 	fmt.Println("found entities:", found)
 }
+
+func TestAdapter_LookupEntitiesConcurrent(t *testing.T) {
+	ctx := context.Background()
+
+	driver, cleanup, err := Connect(ctx)
+	defer cleanup()
+	require.NoError(t, err)
+
+	a := NewAdapter(driver)
+
+	lookupDate, err := time.Parse(time.RFC3339, "2021-02-09T00:00:00Z")
+	require.NoError(t, err)
+
+	const threads = 10
+
+	const maxEntityCount = 100_000
+	const lookupCount = 1000
+
+	gen := resolvetest.NewDataGen(1)
+
+	lookups := gen.NewLookups(lookupCount, maxEntityCount, lookupDate)
+
+	lookupResults, err := a.LookupEntitiesConcurrent(ctx, lookups, threads)
+	require.NoError(t, err)
+
+	var found int
+	for _, res := range lookupResults {
+		if res.Success {
+			found++
+		}
+	}
+	fmt.Println("found entities:", found)
+}
