@@ -225,9 +225,9 @@ func (g *DataGen) NewLookups(n, maxEntityCount int, date time.Time) []resolve.Lo
 		} else {
 			identifier = g.assetIDLookup()
 		}
-		if _, ok := lookupsMap[identifier]; ok {
-			continue
-		}
+		// if _, ok := lookupsMap[identifier]; ok {
+		// 	continue
+		// }
 		lookupsMap[identifier] = struct{}{}
 
 		lookup := resolve.Lookup{

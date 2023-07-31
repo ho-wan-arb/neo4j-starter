@@ -114,7 +114,7 @@ func (a *Adapter) Cleanup(ctx context.Context) error {
 			WITH n
 			DETACH DELETE n
 		} IN TRANSACTIONS OF 10000 ROWS
-	`, nil, neo4j.WithTxTimeout(5*time.Minute))
+	`, nil, neo4j.WithTxTimeout(20*time.Minute))
 	if err != nil {
 		return fmt.Errorf("execute delete: %w", err)
 	}
@@ -170,13 +170,13 @@ func (a *Adapter) LookupEntities(ctx context.Context, lookups []resolve.Lookup) 
 	session := a.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: dbName, AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
 
-	timerStart := time.Now()
+	// timerStart := time.Now()
 
 	res, err := neo4j.ExecuteRead(ctx, session, getLookupResults(ctx, lookups))
 	if err != nil {
 		return nil, fmt.Errorf("lookup entities: %w", err)
 	}
-	fmt.Printf("time taken: %v\n", time.Since(timerStart))
+	// fmt.Printf("time taken: %v\n", time.Since(timerStart))
 
 	return res, nil
 }
@@ -185,7 +185,7 @@ func (a *Adapter) LookupEntitiesConcurrent(ctx context.Context, lookups []resolv
 	session := a.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: dbName, AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
 
-	timerStart := time.Now()
+	// timerStart := time.Now()
 
 	wg := &sync.WaitGroup{}
 
@@ -217,7 +217,7 @@ func (a *Adapter) LookupEntitiesConcurrent(ctx context.Context, lookups []resolv
 		res = append(res, r...)
 	}
 
-	fmt.Printf("time taken: %v\n", time.Since(timerStart))
+	// fmt.Printf("time taken: %v\n", time.Since(timerStart))
 
 	return res, nil
 }
@@ -361,7 +361,7 @@ func getLookupResults(ctx context.Context, lookups []resolve.Lookup) func(tx neo
 }
 
 func (a *Adapter) CreateEntities(ctx context.Context, entities []*resolve.Entity) error {
-	session := a.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: dbName})
+	session := a.driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: dbName, AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
 
 	var err error
@@ -457,12 +457,11 @@ func (a *Adapter) CreateEntities(ctx context.Context, entities []*resolve.Entity
 
 	// fmt.Println(qb.ToQueryWithParams())
 
-	_, err = session.ExecuteWrite(ctx,
-		func(tx neo4j.ManagedTransaction) (any, error) {
-			_, err := tx.Run(ctx, qb.String(), qb.params)
-			return nil, err
-		},
-		neo4j.WithTxTimeout(60*time.Minute),
+	_, err = session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, qb.String(), qb.params)
+		return nil, err
+	},
+		neo4j.WithTxTimeout(20*time.Minute),
 	)
 	if err != nil {
 		return fmt.Errorf("create entities: %w", err)
@@ -491,7 +490,7 @@ func Connect(ctx context.Context) (neo4j.DriverWithContext, func(), error) {
 
 	cleanup := func() {
 		if err := driver.Close(ctx); err != nil {
-			log.Fatal(err)
+			log.Println(fmt.Errorf("close driver: %w", err))
 		}
 	}
 	if err != nil {

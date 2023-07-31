@@ -54,3 +54,10 @@ TEST_NEO4J_HOST="localhost" TEST_NEO4J_VERSION=4.4 \
 Requires installation of Java SDK
 
 https://neo4j.com/download/
+
+### Benchmarks
+
+```sh
+cd ./n4j
+go test -run=Benchmark_LookupEntities -bench=. -timeout=20m -benchtime=1s
+```
