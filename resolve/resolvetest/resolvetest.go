@@ -191,6 +191,54 @@ func (g *DataGen) NewSecurityIdentifiers() []resolve.Identifier {
 	return identifiers
 }
 
+func (g *DataGen) srayEntityIDLookup() resolve.Identifier {
+	identifierType := "sray_entity_id"
+	return resolve.Identifier{
+		Type:  resolve.IdentifierType(identifierType),
+		Value: fmt.Sprint(g.IntRange(1, g.entityID)),
+	}
+}
+
+func (g *DataGen) assetIDLookup() resolve.Identifier {
+	identifierType := "asset_id"
+	return resolve.Identifier{
+		Type:  resolve.IdentifierType(identifierType),
+		Value: fmt.Sprint(g.IntRange(1, g.assetID)),
+	}
+}
+
+func (g *DataGen) NewLookups(n, maxEntityCount int, date time.Time) []resolve.Lookup {
+	// use map to avoid duplicate identifiers
+	lookupsMap := make(map[resolve.Identifier]struct{})
+
+	g.entityID = maxEntityCount
+	g.assetID = maxEntityCount
+
+	lookups := make([]resolve.Lookup, 0, n)
+	for len(lookups) < n {
+		date = date.AddDate(0, 0, g.IntRange(1, 3))
+
+		var identifier resolve.Identifier
+		// 50/50 to generate sray entity id vs asset id
+		if g.Float32Range(0, 1) > 0.5 {
+			identifier = g.srayEntityIDLookup()
+		} else {
+			identifier = g.assetIDLookup()
+		}
+		if _, ok := lookupsMap[identifier]; ok {
+			continue
+		}
+		lookupsMap[identifier] = struct{}{}
+
+		lookup := resolve.Lookup{
+			Date:       &date,
+			Identifier: identifier,
+		}
+		lookups = append(lookups, lookup)
+	}
+	return lookups
+}
+
 func (g *DataGen) newIsin() string {
 	isin := g.Isin()
 	g.isins = append(g.isins, isin)

@@ -7,10 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"neo4j-starter/resolve"
 	"neo4j-starter/resolve/resolvetest"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,30 +70,24 @@ func TestAdapter_LookupEntities(t *testing.T) {
 
 	a := NewAdapter(driver)
 
-	lookupDate, err := time.Parse(time.RFC3339, "2023-02-09T00:00:00Z")
+	lookupDate, err := time.Parse(time.RFC3339, "2021-02-09T00:00:00Z")
 	require.NoError(t, err)
 
-	// const maxSrayEntityID = 1000
+	const maxEntityCount = 100_000
 	const lookupCount = 1000
 
-	// rand.Seed(1)
+	gen := resolvetest.NewDataGen(1)
 
-	var lookups []resolve.Lookup
-	for i := 0; i < lookupCount; i++ {
-		lookup := resolve.Lookup{
-			Date: &lookupDate,
-			Identifier: resolve.Identifier{
-				Type: "sray_entity_id",
-				// Value: fmt.Sprint(rand.Intn(maxSrayEntityID)),
-				Value: fmt.Sprint(i),
-			},
-		}
-		lookups = append(lookups, lookup)
-	}
+	lookups := gen.NewLookups(lookupCount, maxEntityCount, lookupDate)
+
+	// fmt.Println(PrettyPrint(lookups))
 
 	lookupResults, err := a.LookupEntities(ctx, lookups)
 	require.NoError(t, err)
-	assert.Equal(t, len(lookups), len(lookupResults), "should get same count as in lookup")
+	// count might not be equal when looking up same identifiers
+	require.Equal(t, len(lookups), len(lookupResults), "should get same count as in lookup")
+
+	// fmt.Println(PrettyPrint(lookupResults))
 
 	var found int
 	for _, res := range lookupResults {

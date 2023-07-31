@@ -47,61 +47,28 @@ WITH ent,collect(distinct(idn)) + collect(i) as ii
 UNWIND ii as idns
 RETURN ent as entity,collect(idns) as identifiers
 
-// Match on identifier belonging to entity returning name, country and security identifiers
-MATCH (idn:Identifier{type:'sray_entity_id',value:'1'})<--(ent:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
-    WHERE ($date > hi.from and (hi.until IS NULL OR $date < hi.until))
-OPTIONAL MATCH (ent)-[hs:HAS_SECURITY]->(sec:Security)-->(si:Identifier)
-    WHERE ($date > hs.from and (hs.until IS NULL OR $date < hs.until))
-WITH ent,collect(distinct(idn)) + collect(i) as ii,collect(distinct(sec)) as securities,collect(si) as security_identifiers
-    UNWIND ii as idns
-OPTIONAL MATCH (ent)-[hn:HAS_NAME]->(name:EntityName)
-    WHERE ($date > hn.from and (hn.until IS NULL OR $date < hn.until))
-OPTIONAL MATCH (ent)-[hc:HAS_COUNTRY]->(country:Country)
-    WHERE ($date > hc.from and (hc.until IS NULL OR $date < hc.until))
-RETURN ent as entity,collect(distinct(idns)) as identifiers,name,country,securities,security_identifiers
-
-// Lookup using array
-
-WITH [['sray_entity_id','0','2023-02-09T00:00:00Z'],['sray_entity_id','5','2023-02-09T00:00:00Z'],['sray_entity_id','6','2023-02-09T00:00:00Z'],['sray_entity_id','7','2023-02-09T00:00:00Z']] AS lookups
+// Lookup entities using identifier
+WITH [['asset_id','1','2023-02-09T00:00:00Z'],['sray_entity_id','5','2023-02-09T00:00:00Z']] AS lookups
 UNWIND lookups AS lookup
-OPTIONAL MATCH (idn:Identifier {type: lookup[0],value: lookup[1]})<--(entity:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
+OPTIONAL MATCH (idn:Identifier {type: lookup[0],value: lookup[1]})
+OPTIONAL MATCH (idn)--(:Entity|Security)-[:HAS_SECURITY*0..1]-(entity:Entity)
+OPTIONAL MATCH (entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
     WHERE (hi.from <= lookup[2] and (hi.until IS NULL OR lookup[2] < hi.until))
 OPTIONAL MATCH (entity)-[hn:HAS_NAME]->(name:Name)
     WHERE (hn.from <= lookup[2] and (hn.until IS NULL OR lookup[2] < hn.until))
 OPTIONAL MATCH (entity)-[hs:HAS_SECURITY]->(security:Security)-->(si:Identifier)
     WHERE (hs.from <= lookup[2] and (hs.until IS NULL OR lookup[2] < hs.until))
-RETURN lookup, entity, (collect(i)+collect(idn)) as identifiers, name, collect(security), collect(si) as security_identifiers
+RETURN lookup,entity,collect(distinct(i)) as identifiers, name, collect(distinct(security)), collect(distinct(si)) as security_identifiers
 
 // Profile raw query to create entity with params replaced
-
-PROFILE
 CREATE (entity_0:Entity {id:'4f163f5f-0f9a-421d-b295-66c74d10037c'})
 CREATE (entity_0)-[:HAS_NAME {from:'2020-04-27T00:00:00Z',until:'2023-03-31T00:00:00Z'}]->(entity_0_name_0:EntityName {value:'Stevens Worldwide Van Lines'})
-CREATE (entity_0)-[:HAS_NAME {from:'2023-03-31T00:00:00Z',until:'2023-05-29T00:00:00Z'}]->(entity_0_name_1:EntityName {value:'FlightAware'})
-CREATE (entity_0)-[:HAS_NAME {from:'2023-05-29T00:00:00Z'}]->(entity_0_name_2:EntityName {value:'Forrester Research'})
-CREATE (entity_0)-[:HAS_COUNTRY {from:'2020-04-27T00:00:00Z'}]->(entity_0_country_0:Country {value:'Solomon Islands'})
-CREATE (entity_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_identifier_0:Identifier {type:'resolve_id',value:'4d7bbb04-0736-4951-baa2-ff6cd471c483'})
-CREATE (entity_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_identifier_1:Identifier {type:'sray_entity_id',value:'1'})
-CREATE (entity_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_identifier_2:Identifier {type:'fs_entity_id',value:'000001-E'})
-CREATE (entity_0)-[:HAS_SECURITY {from:'2020-04-27T00:00:00Z',primary:true}]->(entity_0_duration_0_security_0:Security {name:'clean horde'})
-CREATE (entity_0_duration_0_security_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_0_identifier_0:Identifier {type:'asset_id',value:'1'})
-CREATE (entity_0_duration_0_security_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_0_identifier_1:Identifier {type:'isin',value:'DEK1HH2GDN09'})
-CREATE (entity_0_duration_0_security_0)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_0_identifier_2:Identifier {type:'cusip',value:'XXVI7HVS0'})
-CREATE (entity_0)-[:HAS_SECURITY {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_1:Security {name:'these sedge'})
-CREATE (entity_0_duration_0_security_1)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_1_identifier_0:Identifier {type:'asset_id',value:'2'})
-CREATE (entity_0_duration_0_security_1)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_1_identifier_1:Identifier {type:'isin',value:'SC82TVJZJP78'})
-CREATE (entity_0)-[:HAS_SECURITY {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_2:Security {name:'where villa'})
-CREATE (entity_0_duration_0_security_2)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_2_identifier_0:Identifier {type:'asset_id',value:'3'})
-CREATE (entity_0_duration_0_security_2)-[:HAS_IDENTIFIER {from:'2020-04-27T00:00:00Z'}]->(entity_0_duration_0_security_2_identifier_1:Identifier {type:'cusip',value:'VMKIR0XC6'})
 
-// Query not optimized due to incrementing variable names, and is slow,
-// and only creating ~20 entities/s.
-// After refactoring to batch using loops, and reuse the variable names which
-// lets the db cache the query plan, the speed increase to ~2000 entities/s.
+// Queries using incrementing variable names is slow only creating ~20 entities/s,
+// as the DB is unable to cache the query plan, eg. Create (entity_0...), Create (entity_1:...)
+// After refactoring to batch using loops the speed increase to ~2000 entities/s.
 
-
-// Create entity and identifiers
-
+// Create entity and identifiers using array of params
 WITH [['1','Entity A',[['sray_entity_id','1'],['fs_entity_id','000001-e']]],['2','Entity B',[]],['3','',[['sray_entity_id','3']]]] as entities
 UNWIND entities AS e
 CREATE (ent:Entity {id: e[0]})

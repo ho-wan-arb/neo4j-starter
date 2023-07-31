@@ -179,18 +179,19 @@ func (a *Adapter) LookupEntities(ctx context.Context, lookups []resolve.Lookup) 
 		})
 	}
 
-	// TODO - support lookup of securitiy identifier
 	qb := newQueryBuilder()
 	qb.WriteString(`
 		WITH $lookupList as lookups
 		UNWIND lookups AS lookup
-		OPTIONAL MATCH (idn:Identifier {type: lookup[0],value: lookup[1]})<--(entity:Entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
+		OPTIONAL MATCH (idn:Identifier {type: lookup[0],value: lookup[1]})
+		OPTIONAL MATCH (idn)--(:Entity|Security)-[:HAS_SECURITY*0..1]-(entity:Entity)
+		OPTIONAL MATCH (entity)-[hi:HAS_IDENTIFIER]->(i:Identifier)
 			WHERE (hi.from <= lookup[2] and (hi.until IS NULL OR lookup[2] < hi.until))
 		OPTIONAL MATCH (entity)-[hn:HAS_NAME]->(name:Name)
 			WHERE (hn.from <= lookup[2] and (hn.until IS NULL OR lookup[2] < hn.until))
 		OPTIONAL MATCH (entity)-[hs:HAS_SECURITY]->(security:Security)-->(si:Identifier)
 			WHERE (hs.from <= lookup[2] and (hs.until IS NULL OR lookup[2] < hs.until))
-		RETURN lookup, entity, (collect(i)+collect(idn)) as identifiers, name, collect(security), collect(si) as security_identifiers
+		RETURN lookup,entity,collect(distinct(i)) as identifiers, name, collect(distinct(security)) as securities, collect(distinct(si)) as security_identifiers
 	`)
 	qb.params["lookupList"] = lookupList
 
@@ -226,25 +227,56 @@ func (a *Adapter) LookupEntities(ctx context.Context, lookups []resolve.Lookup) 
 					return nil, fmt.Errorf("uuid from string: %w", err)
 				}
 
-				entityNode, _, err = neo4j.GetRecordValue[neo4j.Node](record, "name")
-				if err == nil {
-					name, ok := entityNode.Props["value"]
-					if ok {
-						s := name.(string)
-						entity.Name = []resolve.DetailDuration[resolve.EntityName]{
-							{
-								Detail: resolve.EntityName{
-									Value: s,
-								},
-							},
-						}
-					}
-
+				nameNode, _, err := neo4j.GetRecordValue[neo4j.Node](record, "name")
+				if err != nil {
+					return nil, fmt.Errorf("get name: %w", err)
 				}
-				// TODO - country not yet set
+				name, ok := nameNode.Props["value"]
+				if ok {
+					s := name.(string)
+					entity.Name = []resolve.DetailDuration[resolve.EntityName]{
+						{
+							Detail: resolve.EntityName{
+								Value: s,
+							},
+						},
+					}
+				}
+
+				rawIdentifiers, ok := record.Get("identifiers")
+				if ok {
+					identifierNodes := rawIdentifiers.([]any)
+					identifiers := make([]resolve.Identifier, 0, len(identifierNodes))
+					for _, identifier := range identifierNodes {
+						identifierNode := identifier.(neo4j.Node)
+
+						identifiers = append(identifiers, resolve.Identifier{
+							Type:  resolve.IdentifierType(fmt.Sprint(identifierNode.Props["type"])),
+							Value: fmt.Sprint(identifierNode.Props["value"]),
+						})
+					}
+					entity.Identifiers = append(entity.Identifiers, resolve.DetailDuration[[]resolve.Identifier]{
+						Detail: identifiers,
+					})
+					// return the 'point in time' identifiers, not the full history
+				}
+
+				rawSecurities, ok := record.Get("securities")
+				if ok {
+					securityNodes := rawSecurities.([]any)
+					securities := make([]resolve.Security, 0, len(securityNodes))
+					for _, security := range securityNodes {
+						securityNodes := security.(neo4j.Node)
+						securities = append(securities, resolve.Security{
+							Name: fmt.Sprint(securityNodes.Props["name"]),
+						})
+					}
+					entity.Securities = append(entity.Securities, resolve.DetailDuration[[]resolve.Security]{
+						Detail: securities,
+					})
+				}
 
 				// TODO - map identifiers, security, security identifers in result
-				_, _ = record.Get("identifiers")
 				_, _ = record.Get("security_identifiers")
 
 				lookups = append(lookups, resolve.LookupResult{
