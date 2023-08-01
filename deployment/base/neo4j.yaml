@@ -21,7 +21,6 @@ spec:
       app: neo4j
 
   template:
-
     metadata:
       labels:
         app: neo4j
@@ -33,51 +32,51 @@ spec:
 
     spec:
       containers:
-      - name: neo4j
-        image: "neo4j:5.8.0"
-        imagePullPolicy: "IfNotPresent"
-        env:
-          - name: NEO4J_AUTH
-            valueFrom:
-              secretKeyRef:
-                name: neo4j-secrets 
-                key: auth
-        ports:
-        - containerPort: 7474
-          name: http
-        - containerPort: 7473
-          name: https
-        - containerPort: 7687
-          name: bolt
-        - containerPort: 6362
-          name: backup
-        - containerPort: 2004
-          name: prometheus
+        - name: neo4j
+          image: "neo4j:5.8.0"
+          imagePullPolicy: "IfNotPresent"
+          env:
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: neo4j-secrets
+                  key: auth
+          ports:
+            - containerPort: 7474
+              name: http
+            - containerPort: 7473
+              name: https
+            - containerPort: 7687
+              name: bolt
+            - containerPort: 6362
+              name: backup
+            - containerPort: 2004
+              name: prometheus
 
-        volumeMounts:
-        - name: datadir
-          mountPath: "/data"
-        - name: config
-          mountPath: "/conf"
+          volumeMounts:
+            - name: datadir
+              mountPath: "/data"
+            - name: config
+              mountPath: "/conf"
 
-        resources:
-          requests:
-            cpu: 500m
-            memory: 512Mi
-          limits:
-            cpu: 1
-            memory: 1Gi
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 1
+              memory: 4Gi
 
-        readinessProbe:
-          tcpSocket:
-            port: 7687
-          initialDelaySeconds: 30
-          periodSeconds: 3
+          readinessProbe:
+            tcpSocket:
+              port: 7687
+            initialDelaySeconds: 30
+            periodSeconds: 3
 
-        livenessProbe:
-          initialDelaySeconds: 60
-          tcpSocket:
-            port: 7687
+          livenessProbe:
+            initialDelaySeconds: 60
+            tcpSocket:
+              port: 7687
 
       volumes:
         - name: config
@@ -98,7 +97,7 @@ spec:
 # configuration (mounted in /conf)
 
 # TODO need to figure out how to monitor - metrics are only available in the
-# enterprise edition https://neo4j.com/docs/operations-manual/current/monitoring/metrics/ 
+# enterprise edition https://neo4j.com/docs/operations-manual/current/monitoring/metrics/
 
 apiVersion: v1
 kind: ConfigMap
@@ -107,12 +106,11 @@ metadata:
 
 data:
   neo4j.conf: |
-    server.memory.pagecache.size=128M
+    server.memory.pagecache.size=2g
     server.default_listen_address=0.0.0.0
     server.directories.logs=/logs
     server.config.strict_validation.enabled=false
-
-    server.metrics.prometheus.enabled=true
+    server.memory.heap.max_size=2g
 ---
 # secret (exposed through environment variables)
 
@@ -126,24 +124,23 @@ stringData:
   auth: neo4j/changeme
 
 ---
-
 apiVersion: v1
 kind: Service
 metadata:
-  name: neo4jsvc  # NOTE must not start with neo4j-, as this creates environment
-                  # variables like NEO4J_SVC_PORT_7687_TCP_PORT=7687, which neo4j
-                  # picks up as configuraiton settings - and fails
-                  # see also https://kubernetes.io/docs/concepts/services-networking/service/#discovering-services
+  name:
+    neo4jsvc # NOTE must not start with neo4j-, as this creates environment
+    # variables like NEO4J_SVC_PORT_7687_TCP_PORT=7687, which neo4j
+    # picks up as configuraiton settings - and fails
+    # see also https://kubernetes.io/docs/concepts/services-networking/service/#discovering-services
 spec:
   selector:
     app: neo4j
   ports:
-  - port: 7474
-    name: http
-  - port: 7473
-    name: https
-  - port: 7687
-    name: bolt
-
+    - port: 7474
+      name: http
+    - port: 7473
+      name: https
+    - port: 7687
+      name: bolt
 # TODO check whether we need to open an ingress, e.g., to connect directly to
-      # the https port
+# the https port
